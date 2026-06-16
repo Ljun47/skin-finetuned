@@ -1,0 +1,35 @@
+# API keys & configurations
+.env
+*.env
+
+# Large datasets & raw data folders
+원본 데이터/
+1차 파인튜닝/
+2차 파인튜닝/
+백:프론트/
+Train_라벨링데이터/
+Train_원천데이터/
+Val_라벨링데이터/
+Val_원천데이터/
+*.jsonl
+!data/sample_data/*.jsonl
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# OS artifacts
+.DS_Store
+
+# Frontend build cache & logs
+service/frontend/dist/
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Presentation PDF
+최종 발표.pdf
