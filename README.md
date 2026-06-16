@@ -96,7 +96,7 @@ graph TD
 ## ⚙️ 실행 방법 (How to Run)
 
 ### 1. 환경 변수 설정
-프로젝트 루트 또는 `service/backend/` 폴더에 `.env` 파일을 생성하고 아래 규격에 맞게 변수를 선언합니다. (학습용 코드는 상위 디렉토리의 `.env`를 자동으로 스캔합니다.)
+프로젝트 루트에 `.env` 파일을 생성하고 아래 규격에 맞게 변수를 선언합니다. (학습용 코드는 상위 디렉토리의 `.env`를 자동으로 스캔합니다.)
 ```env
 # Gemini API Key (번역 및 가드레일 제어용)
 GEMINI_API_KEY=your_gemini_api_key
