@@ -24,12 +24,12 @@ graph TD
     User([사용자]) -->|1. 한국어 질문 & 이미지| FE[React Frontend]
     FE -->|2. POST /predict| BE[Flask Backend]
     
-    subgraph Translation & Vetting (Gemini API)
+    subgraph "Translation & Vetting (Gemini API)"
         BE -->|3. 번역 및 가드레일 검수| Gemini[Gemini-2.5-Flash]
         Gemini -->|4. 번역 결과 및 안전성 판정| BE
     end
 
-    subgraph Core Inference (Hugging Face Endpoint)
+    subgraph "Core Inference (Hugging Face Endpoint)"
         BE -->|5. 영어 질문 + 이미지| HF[LLaVA-1.5-7B SFT Model]
         HF -->|6. 영어 추론 결과| BE
     end
@@ -70,6 +70,8 @@ graph TD
 
 ```
 ├── README.md                       # 프로젝트 소개 및 실행 문서
+├── .env                            # [Local Only] API 키 설정 파일 (깃 제외)
+├── .env.example                    # 로컬 환경변수 설정 템플릿
 ├── data/
 │   ├── sample_data/                # 데이터 구조 파악을 위한 샘플 스키마 파일
 │   │   ├── sample_sft.jsonl        # 1차 SFT 데이터셋 예시 (50 line)
@@ -84,9 +86,7 @@ graph TD
 └── service/
     ├── backend/
     │   ├── app.py                  # Flask 웹 서버 메인 (Gemini & Endpoint 인터페이스)
-    │   ├── requirements.txt        # 백엔드 패키지 사양
-    │   ├── .env.example            # 로컬 환경변수 템플릿
-    │   └── .env                    # [Local Only] API 키 정보
+    │   └── requirements.txt        # 백엔드 패키지 사양
     └── frontend/
         └── dist/                   # UI 배포용 React 빌드 아티팩트
 ```

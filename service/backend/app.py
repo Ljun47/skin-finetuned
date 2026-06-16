@@ -11,11 +11,16 @@ from gevent.pywsgi import WSGIServer
 from dotenv import load_dotenv
 
 # --------------------------
-# 💡 환경 변수 로드
+# 💡 환경 변수(.env) 자동 스캔 및 로드
 # --------------------------
-env_path = os.path.join(os.path.dirname(__file__), '.env')
-if os.path.exists(env_path):
-    load_dotenv(env_path)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_env = os.path.join(current_dir, "../../.env")
+local_env = os.path.join(current_dir, ".env")
+
+if os.path.exists(local_env):
+    load_dotenv(local_env)
+elif os.path.exists(root_env):
+    load_dotenv(root_env)
 else:
     load_dotenv()
 
