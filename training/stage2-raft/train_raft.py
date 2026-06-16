@@ -1,10 +1,25 @@
-# ==================================================
-# [Code Cell]
-# ==================================================
 import os
+from dotenv import load_dotenv
 
 # W&B 로깅을 완전히 비활성화합니다.
 os.environ['WANDB_MODE'] = 'disabled'
+
+# --------------------------
+# 💡 환경 변수(.env) 자동 스캔 및 로드
+# --------------------------
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_env = os.path.join(current_dir, "../../.env")
+backend_env = os.path.join(current_dir, "../../service/backend/.env")
+local_env = os.path.join(current_dir, ".env")
+
+if os.path.exists(local_env):
+    load_dotenv(local_env)
+elif os.path.exists(backend_env):
+    load_dotenv(backend_env)
+elif os.path.exists(root_env):
+    load_dotenv(root_env)
+else:
+    load_dotenv()
 
 
 
@@ -456,7 +471,7 @@ print("✅ Merge 완료! 저장 경로:", MERGED_DIR)
 # ==================================================
 from huggingface_hub import HfApi, upload_folder
 
-HF_TOKEN = "YOUR_HF_TOKEN"
+HF_TOKEN = os.getenv("HF_TOKEN", "")
 REPO_ID = "jayun/llava_raft_01"
 MODEL_DIR = "/content/llava_raft_merged"
 
@@ -506,7 +521,7 @@ for root, dirs, files in os.walk(MERGED_DIR):
 from huggingface_hub import HfApi
 import os
 
-HF_TOKEN = "YOUR_HF_TOKEN"
+HF_TOKEN = os.getenv("HF_TOKEN", "")
 REPO_ID = "jayun/llava_raft_01"
 MERGED_DIR = "/content/llava_raft_merged"
 
@@ -699,7 +714,7 @@ print("✅ handler.py 생성 완료")
 # Hugging Face에 업로드
 from huggingface_hub import HfApi
 
-HF_TOKEN = "YOUR_HF_TOKEN"
+HF_TOKEN = os.getenv("HF_TOKEN", "")
 REPO_ID = "jayun/llava_raft_01"
 
 api = HfApi(token=HF_TOKEN)

@@ -96,11 +96,21 @@ graph TD
 ## ⚙️ 실행 방법 (How to Run)
 
 ### 1. 환경 변수 설정
-`service/backend/` 폴더에 `.env` 파일을 생성하고 아래 형식을 기입합니다.
+프로젝트 루트 또는 `service/backend/` 폴더에 `.env` 파일을 생성하고 아래 규격에 맞게 변수를 선언합니다. (학습용 코드는 상위 디렉토리의 `.env`를 자동으로 스캔합니다.)
 ```env
+# Gemini API Key (번역 및 가드레일 제어용)
 GEMINI_API_KEY=your_gemini_api_key
+
+# Hugging Face API Read Token (Inference Endpoint 호출용)
 HF_API_TOKEN=your_huggingface_read_token
+
+# Hugging Face API Write Token (Fine-Tuning 모델 업로드용)
+HF_TOKEN=your_huggingface_write_token
+
+# ngrok 인증 토큰 (로컬 Flask 서버 터널링용)
 NGROK_AUTH_TOKEN=your_ngrok_auth_token
+
+# Hugging Face Inference Endpoint URL
 HF_ENDPOINT_URL=your_huggingface_endpoint_url
 ```
 
