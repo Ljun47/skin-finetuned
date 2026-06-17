@@ -1,85 +1,8 @@
+import argparse
 import os
-from dotenv import load_dotenv
-
-# W&B 로깅을 완전히 비활성화합니다.
-os.environ['WANDB_MODE'] = 'disabled'
-
-# --------------------------
-# 💡 환경 변수(.env) 자동 스캔 및 로드
-# --------------------------
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_env = os.path.join(current_dir, "../../.env")
-backend_env = os.path.join(current_dir, "../../service/backend/.env")
-local_env = os.path.join(current_dir, ".env")
-
-if os.path.exists(local_env):
-    load_dotenv(local_env)
-elif os.path.exists(backend_env):
-    load_dotenv(backend_env)
-elif os.path.exists(root_env):
-    load_dotenv(root_env)
-else:
-    load_dotenv()
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-# # 깃허브 업로드 및 로컬 실행을 위해 pip 명령 주석 처리
-# !pip install torch torchvision transformers
-# !pip install accelerate peft
-# !pip install pillow requests
-# !pip install -U bitsandbytes
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-# import torch
-# import gc
-# 
-# # GPU 캐시 비우기
-# torch.cuda.empty_cache()
-# 
-# # 가비지 컬렉션 실행
-# gc.collect()
-# 
-# # VRAM 사용량 확인
-# print(f"할당된 메모리: {torch.cuda.memory_allocated()/1024**3:.2f} GB")
-# print(f"예약된 메모리: {torch.cuda.memory_reserved()/1024**3:.2f} GB")
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-# from google.colab import drive
-# drive.mount('/content/drive')
-
-
-
-"""
-## **2차 파인튜닝 코드**
-"""
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-# # pip 설치 주석 처리
-# !pip install -U "transformers>=4.40.0" accelerate safetensors datasets pillow
-
-import os
-import json
-from dataclasses import dataclass
-from typing import Dict, List, Any
-
+import shutil
+import sys
 import torch
-from torch.utils.data import Dataset
-from PIL import Image
-
 from transformers import (
     AutoProcessor,
     LlavaForConditionalGeneration,
@@ -87,647 +10,251 @@ from transformers import (
     Trainer,
     BitsAndBytesConfig,
 )
-
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-bnb_config = BitsAndBytesConfig(
-    load_in_8bit=True,              # ✅ 4bit → 8bit 양자화
-    llm_int8_threshold=3.0,
-    llm_int8_has_fp16_weight=False
-)
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-# 1차 SFT까지 끝난 체크포인트 경로 (너 환경에 맞게 수정)
-SFT_CHECKPOINT_DIR = "/content/drive/MyDrive/dataset/finetuned_test_04"
-BASE_MODEL_ID = "llava-hf/llava-1.5-7b-hf"
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-# processor는 SFT 체크포인트나 base 중 아무거나 써도 됨 (토크나이저 구조 동일하면 OK)
-processor = AutoProcessor.from_pretrained(SFT_CHECKPOINT_DIR)
-
-model = LlavaForConditionalGeneration.from_pretrained(
-    SFT_CHECKPOINT_DIR,
-    quantization_config=bnb_config,
-    device_map="auto",
-)
-
-model.config.use_cache = False
-print("✅ 8bit SFT 모델 로드 완료")
-
-# 🔥🔥🔥 PEFT (LoRA) 설정 추가 🔥🔥🔥
-# 1. k-bit 학습을 위해 모델을 준비 (8bit)
-model = prepare_model_for_kbit_training(model)
-
-# 2. LoRA 설정 정의 (R: 64, Alpha: 16은 흔히 사용되는 최적 설정)
-lora_config = LoraConfig(
-    r=64,
-    lora_alpha=16,
-    # LLaVA 1.5에서 Q, K, V, O (Attention Projection) 레이어에 LoRA 적용
-    target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
-    lora_dropout=0.1,
-    bias="none",
-    task_type="CAUSAL_LM",
-)
-
-# 3. 모델에 LoRA 어댑터 적용
-model = get_peft_model(model, lora_config)
-# 학습 가능한 파라미터 수를 확인하여 메모리 효율성 확인
-model.print_trainable_parameters()
-# 🔥🔥🔥 LoRA 설정 끝 🔥🔥🔥
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-import json
-import random
-from typing import Dict, List, Any
-from torch.utils.data import Dataset
-
-class DermaRaftTextDatasetWithDocs(Dataset):
-    """
-    RAFT 텍스트 전용 데이터셋
-    - query
-    - golden (label, text)
-    - hard_negatives: list of {label, text}
-    - easy_negative: {label, text} or None
-
-    __getitem__에서 매번 문맥 순서를 랜덤으로 섞고,
-    그 중 어떤 번호가 golden인지 golden_doc_id로 반환.
-    """
-
-    def __init__(self, path: str):
-        self.samples: List[Dict[str, Any]] = []
-
-        # JSON 배열 vs JSONL 자동 감지
-        with open(path, "r", encoding="utf-8") as f:
-            first_char = f.read(1)
-            f.seek(0)
-            if first_char == "[":
-                raw_list = json.load(f)
-            else:
-                raw_list = []
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    raw_list.append(json.loads(line))
-
-        for obj in raw_list:
-            query     = obj.get("query")
-            golden    = obj.get("golden", {}) or {}
-            hard_negs = obj.get("hard_negatives", []) or []
-            easy_neg  = obj.get("easy_negative", None)
-
-            golden_text = golden.get("text")
-            golden_label = golden.get("label")
-
-            if not query or not golden_text:
-                # 필수 정보 없으면 스킵
-                continue
-
-            # raw 형태로 저장해두고, 실제 문맥 배열은 __getitem__에서 섞어서 생성
-            self.samples.append({
-                "query": query,
-                "golden_text": golden_text,
-                "golden_label": golden_label,
-                "hard_negatives": hard_negs,
-                "easy_negative": easy_neg,
-            })
-
-        print(f"✅ RAFT 텍스트+문맥 데이터 로드 완료: {len(self.samples)} samples")
-        if len(self.samples) > 0:
-            print("  예시 1개 (raw):", self.samples[0])
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        base = self.samples[idx]
-
-        query         = base["query"]
-        golden_text   = base["golden_text"]
-        golden_label  = base["golden_label"]
-        hard_negs     = base["hard_negatives"]
-        easy_neg      = base["easy_negative"]
-
-        # (role, text) 리스트로 모으기
-        docs_raw = [("golden", golden_text)]
-        for hn in hard_negs:
-            docs_raw.append(("hard_negative", hn.get("text")))
-        if easy_neg is not None:
-            docs_raw.append(("easy_negative", easy_neg.get("text")))
-
-        # 텍스트 없는 것 제거
-        docs_raw = [(role, txt) for role, txt in docs_raw if txt]
-
-        # 매 샘플마다 문맥 순서를 랜덤 셔플
-        random.shuffle(docs_raw)
-
-        docs_with_id = []
-        golden_doc_id = None
-        for i, (role, txt) in enumerate(docs_raw, start=1):
-            docs_with_id.append({
-                "id": i,
-                "role": role,
-                "text": txt,
-            })
-            if role == "golden":
-                golden_doc_id = i
-
-        # golden_doc_id는 반드시 하나 있어야 함
-        assert golden_doc_id is not None, "golden 문맥이 누락된 샘플이 있습니다."
-
-        return {
-            "question": query,
-            "answer": golden_text,       # 실제 최종 질의 답변 텍스트
-            "label": golden_label,
-            "docs": docs_with_id,        # 섞인 문맥 리스트
-            "golden_doc_id": golden_doc_id,
-        }
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-RAFT_TRAIN_JSONL_PATH = "/content/raft_train_dataset_final.jsonl"
-train_dataset = DermaRaftTextDatasetWithDocs(RAFT_TRAIN_JSONL_PATH)
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-from dataclasses import dataclass
-from typing import Dict, List, Any
-import torch
-
-@dataclass
-class DataCollatorRaftWithDocs:
-    processor: Any
-
-    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
-        prompts: List[str] = []
-        targets: List[str] = []
-
-        for f in features:
-            q = f["question"]
-            answer_text = f["answer"]
-            docs = f["docs"]
-            golden_doc_id = f["golden_doc_id"]
-
-            # 문맥 블록 문자열 구성
-            # [1] ..., [2] ..., ...
-            docs_lines = []
-            for d in docs:
-                docs_lines.append(f"[{d['id']}] {d['text']}")
-            docs_block = "\n".join(docs_lines)
-
-            # USER 프롬프트 구성 (한국어 설명 포함)
-            prompt_text = (
-                f"{self.processor.tokenizer.bos_token}"
-                "USER:\n"
-                f"질문: {q}\n\n"
-                "아래는 이 질문과 관련 있을 수도 있고 없을 수도 있는 문맥들이다.\n"
-                "각 문맥은 [번호]로 표시되어 있다.\n\n"
-                f"{docs_block}\n\n"
-                "위 문맥들 중에서 질문에 가장 적절한 문맥 번호 하나를 고르고,\n"
-                "그 문맥을 근거로 답변하라.\n"
-                "반드시 아래 형식을 따르라.\n\n"
-                "형식:\n"
-                "근거 문맥: [번호]\n"
-                "답변: (질문에 대한 자세한 설명)\n\n"
-                "ASSISTANT:"
-            )
-
-            # 정답 텍스트 (golden 문맥 번호 + golden_text)
-            target_text = (
-                f"근거 문맥: [{golden_doc_id}]\n"
-                f"답변: {answer_text.strip()}"
-            )
-
-            prompts.append(prompt_text)
-            targets.append(target_text)
-
-        # 1) prompt만 인코딩
-        enc_prompt = self.processor(
-            text=prompts,
-            padding="longest",
-            return_tensors="pt"
-        )
-
-        # 2) prompt + target 같이 인코딩
-        full_texts = [p + " " + t for p, t in zip(prompts, targets)]
-        enc_full = self.processor(
-            text=full_texts,
-            padding="longest",
-            return_tensors="pt"
-        )
-
-        input_ids = enc_full["input_ids"]
-        attention_mask = enc_full["attention_mask"]
-
-        labels = input_ids.clone()
-        pad_id = self.processor.tokenizer.pad_token_id
-
-        # prompt 부분은 loss에서 제외 (-100)
-        for i in range(len(prompts)):
-            prompt_ids = enc_prompt["input_ids"][i]
-            prompt_len = (prompt_ids != pad_id).sum()
-            labels[i, :prompt_len] = -100
-
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": labels
-        }
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-data_collator = DataCollatorRaftWithDocs(processor=processor)
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-RAFT_JSONL_PATH = "/content/raft_train_dataset_final.jsonl"
-output_dir = "/content/llava_raft_stage4_raftdocs"
-
-train_dataset = DermaRaftTextDatasetWithDocs(RAFT_JSONL_PATH)
-data_collator = DataCollatorRaftWithDocs(processor)
-
-use_bf16 = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
-
-training_args = TrainingArguments(
-    output_dir=output_dir,
-    num_train_epochs=1,
-    per_device_train_batch_size=1,
-    gradient_accumulation_steps=8,
-    learning_rate=6e-6,
-    warmup_ratio=0.05,
-    logging_steps=10,
-    save_steps=200,
-    save_total_limit=2,
-    bf16=use_bf16,
-    fp16=not use_bf16,
-    gradient_checkpointing=True,
-    remove_unused_columns=False,
-    report_to="none",
-)
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
-    data_collator=data_collator,
-)
-
-trainer.train()
-
-trainer.save_model(output_dir)
-processor.save_pretrained(output_dir)
-
-print("✅ RAFT 8bit 2차 파인튜닝 완료:", output_dir)
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-# 모델이 저장된 폴더가 /content/trained_model 이라고 가정
-# Google Drive의 '내 드라이브' 안에 'Saved_Models'라는 폴더를 만들고 그곳에 복사
-# 드라이브에 백업
-# !cp -r "/content/llava_raft_stage4_raftdocs" "/content/drive/MyDrive/dataset/finetuned_test_RAFT_03"
-
-
-
-"""
-## **엔드포인트**
-"""
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-from transformers import AutoModelForVision2Seq, AutoProcessor
-from peft import PeftModel
-
-BASE_MODEL = "llava-hf/llava-1.5-7b-hf"          # 파인튜닝에 썼던 베이스
-LORA_DIR   = "/content/llava_raft_stage4_raftdocs"  # LoRA 저장된 폴더
-MERGED_DIR = "/content/llava_raft_merged"       # 합친 모델 저장할 위치
-
-# 1) Base LLaVA 모델 로드
-base = AutoModelForVision2Seq.from_pretrained(
-    BASE_MODEL,
-    torch_dtype="float16",
-    low_cpu_mem_usage=True
-)
-
-# 2) LoRA 어댑터 로드 + 결합
-model = PeftModel.from_pretrained(
-    base,
-    LORA_DIR,
-    torch_dtype="float16"
-)
-
-# 3) LoRA를 base에 merge
-model = model.merge_and_unload()
-
-# 4) 합쳐진 모델 저장
-model.save_pretrained(MERGED_DIR)
-
-# 5) processor/tokenizer도 같이 복사
-processor = AutoProcessor.from_pretrained(BASE_MODEL)
-processor.save_pretrained(MERGED_DIR)
-
-print("✅ Merge 완료! 저장 경로:", MERGED_DIR)
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-from huggingface_hub import HfApi, upload_folder
-
-HF_TOKEN = os.getenv("HF_TOKEN", "")
-REPO_ID = "jayun/llava_raft_01"
-MODEL_DIR = "/content/llava_raft_merged"
-
-api = HfApi(token=HF_TOKEN)
-
-api.create_repo(
-    repo_id=REPO_ID,
-    private=True,
-    exist_ok=True
-)
-
-upload_folder(
-    folder_path=MODEL_DIR,
-    repo_id=REPO_ID,
-    token=HF_TOKEN,
-    commit_message="Upload merged LLaVA RAFT model"
-)
-
-print("✅ 업로드 완료:", f"https://huggingface.co/{REPO_ID}")
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-import os
-
-MERGED_DIR = "/content/llava_raft_merged"
-
-# 저장된 파일 확인
-print("📁 저장된 파일 목록:")
-for root, dirs, files in os.walk(MERGED_DIR):
-    level = root.replace(MERGED_DIR, '').count(os.sep)
-    indent = ' ' * 2 * level
-    print(f'{indent}{os.path.basename(root)}/')
-    subindent = ' ' * 2 * (level + 1)
-    for file in files:
-        filepath = os.path.join(root, file)
-        size_mb = os.path.getsize(filepath) / (1024*1024)
-        print(f'{subindent}{file} ({size_mb:.2f} MB)')
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel
 from huggingface_hub import HfApi
-import os
 
-HF_TOKEN = os.getenv("HF_TOKEN", "")
-REPO_ID = "jayun/llava_raft_01"
-MERGED_DIR = "/content/llava_raft_merged"
+# 패키지 경로 탐색을 위해 최상단 경로 추가
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-print("🚀 Hugging Face 업로드 시작...")
-print(f"📁 업로드 경로: {MERGED_DIR}")
-print(f"🎯 대상 Repo: {REPO_ID}")
-print("-" * 60)
+from utils.env_helper import init_environment, clear_cuda_cache
+from utils.dataset import DermaRaftTextDatasetWithDocs, DataCollatorRaftWithDocs
 
-# README 생성 (없으면)
-readme_path = os.path.join(MERGED_DIR, "README.md")
-if not os.path.exists(readme_path):
-    readme_content = """---
+class LlavaRaftTrainer:
+    def __init__(self, args):
+        self.args = args
+        init_environment()
+        clear_cuda_cache()
+
+        print(f"📥 1차 SFT 완료된 모델 및 Processor 로드 중: {args.sft_checkpoint}")
+        self.processor = AutoProcessor.from_pretrained(args.sft_checkpoint)
+        
+        # 8비트 양자화 설정
+        bnb_config = BitsAndBytesConfig(
+            load_in_8bit=True,
+            llm_int8_threshold=3.0,
+            llm_int8_has_fp16_weight=False
+        )
+        
+        self.model = LlavaForConditionalGeneration.from_pretrained(
+            args.sft_checkpoint,
+            quantization_config=bnb_config,
+            device_map="auto"
+        )
+        self.model.config.use_cache = False
+        print("✅ 8bit 양자화 SFT 모델 로딩 완료.")
+
+        # LoRA 어댑터 적용
+        self.model = prepare_model_for_kbit_training(self.model)
+        
+        lora_config = LoraConfig(
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+            lora_dropout=0.1,
+            bias="none",
+            task_type="CAUSAL_LM"
+        )
+        self.model = get_peft_model(self.model, lora_config)
+        print("🚀 LoRA 어댑터 설정 완료")
+        self.model.print_trainable_parameters()
+
+    def prepare_data(self):
+        print(f"📊 RAFT 텍스트/문맥 데이터셋 빌드 중: {self.args.raft_data}")
+        self.train_dataset = DermaRaftTextDatasetWithDocs(self.args.raft_data)
+        self.data_collator = DataCollatorRaftWithDocs(self.processor)
+
+    def run_training(self):
+        print("🚀 Trainer 설정 및 RAFT QLoRA 학습 개시...")
+        
+        use_bf16 = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
+
+        training_args = TrainingArguments(
+            output_dir=self.args.output_dir,
+            num_train_epochs=self.args.epochs,
+            per_device_train_batch_size=self.args.batch_size,
+            gradient_accumulation_steps=self.args.grad_accum,
+            learning_rate=self.args.lr,
+            warmup_ratio=0.05,
+            logging_steps=10,
+            save_steps=100,
+            save_total_limit=2,
+            bf16=use_bf16,
+            fp16=not use_bf16,
+            gradient_checkpointing=True,
+            remove_unused_columns=False,
+            report_to="none"
+        )
+
+        trainer = Trainer(
+            model=self.model,
+            args=training_args,
+            train_dataset=self.train_dataset,
+            data_collator=self.data_collator
+        )
+
+        trainer.train()
+        trainer.save_model(self.args.output_dir)
+        self.processor.save_pretrained(self.args.output_dir)
+        print(f"✅ RAFT 학습 완료 및 LoRA 어댑터 저장: {self.args.output_dir}")
+
+def merge_and_save_model(args):
+    """
+    베이스 모델과 학습 완료된 LoRA 어댑터를 병합하여 완전한 FP16 모델로 추출 저장합니다.
+    """
+    print("\n🔄 베이스 모델과 LoRA 어댑터 결합(Merge & Unload) 프로세스 시작...")
+    
+    # 1) Base 모델 로드
+    base_model = LlavaForConditionalGeneration.from_pretrained(
+        args.base_model_id,
+        torch_dtype=torch.float16,
+        low_cpu_mem_usage=True,
+        device_map="cpu" # 병합 시 OOM 방지를 위해 cpu 혹은 가벼운 단일 디바이스 할당
+    )
+    
+    # 2) LoRA 어댑터 부착 및 결합
+    model = PeftModel.from_pretrained(
+        base_model,
+        args.output_dir,
+        torch_dtype=torch.float16
+    )
+    
+    merged_model = model.merge_and_unload()
+    
+    # 3) 결과 저장
+    merged_model.save_pretrained(args.merged_dir)
+    processor = AutoProcessor.from_pretrained(args.base_model_id)
+    processor.save_pretrained(args.merged_dir)
+    print(f"✅ 모델 결합 완료 및 저장: {args.merged_dir}")
+
+def upload_to_huggingface(args):
+    """
+    병합 완료된 모델을 지정한 Hugging Face 저장소에 푸시합니다.
+    Inference Endpoint용 handler.py 및 README.md 템플릿도 자동으로 함께 업로드합니다.
+    """
+    print(f"\n📤 Hugging Face 저장소 업로드 시작: {args.repo_id}")
+    
+    hf_token = os.getenv("HF_TOKEN", "")
+    if not hf_token:
+        print("⚠️ [알림] 환경 변수 HF_TOKEN이 설정되지 않았습니다. 업로드를 진행할 수 없습니다.")
+        return
+
+    # 1) handler.py 템플릿 복사
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    src_handler = os.path.join(current_dir, "handler.py")
+    dest_handler = os.path.join(args.merged_dir, "handler.py")
+    
+    if os.path.exists(src_handler):
+        shutil.copy(src_handler, dest_handler)
+        print("📝 Endpoint용 handler.py 파일 병합 폴더에 추가 완료.")
+    else:
+        print(f"⚠️ 경고: {src_handler} 템플릿 파일을 찾을 수 없어 handler.py 동적 추가를 생략합니다.")
+
+    # 2) README.md 자동 생성
+    readme_path = os.path.join(args.merged_dir, "README.md")
+    if not os.path.exists(readme_path):
+        readme_content = f"""---
 license: llama2
-base_model: llava-hf/llava-1.5-7b-hf
+base_model: {args.base_model_id}
 tags:
 - llava
 - vision
-- multimodal
 - raft
+- medical
 - fine-tuned
 language:
+- ko
 - en
 pipeline_tag: image-text-to-text
 ---
 
-# LLaVA 1.5 7B - RAFT Fine-tuned
+# LLaVA 1.5 7B - RAFT 피부 질환 어라인먼트 모델
 
-이 모델은 `llava-hf/llava-1.5-7b-hf`를 RAFT (Retrieval Augmented Fine-Tuning) 기법으로 파인튜닝한 비전-언어 모델입니다.
-
-## 모델 정보
-- **Base Model**: llava-hf/llava-1.5-7b-hf
-- **Model Size**: 7B parameters
-- **Fine-tuning Method**: RAFT
-- **Training Stages**: 2-stage fine-tuning
-
-## 사용 방법
-```python
-from transformers import AutoModelForVision2Seq, AutoProcessor
-from PIL import Image
-import torch
-
-# 모델 로드
-model = AutoModelForVision2Seq.from_pretrained(
-    "jayun/llava_raft_01",
-    torch_dtype=torch.float16,
-    device_map="auto"
-)
-processor = AutoProcessor.from_pretrained("jayun/llava_raft_01")
-
-# 이미지 준비
-image = Image.open("your_image.jpg")
-prompt = "USER: <image>\\nDescribe this image in detail.\\nASSISTANT:"
-
-# 추론
-inputs = processor(text=prompt, images=image, return_tensors="pt").to("cuda", torch.float16)
-output = model.generate(**inputs, max_new_tokens=200, do_sample=False)
-response = processor.decode(output[0], skip_special_tokens=True)
-print(response)
-```
-
-## 모델 구조
-- Vision Encoder: CLIP ViT-L/14
-- Language Model: Vicuna-7B
-- Total Parameters: ~7B
-- Precision: FP16
-
-## 학습 데이터
-- Stage 1: 기본 파인튜닝
-- Stage 2: RAFT documents를 활용한 추가 학습
-
-## 제한사항
-- 영어 위주로 학습됨
-- 이미지 해상도: 336x336 권장
-- GPU 메모리: 최소 16GB 필요
+이 모델은 `{args.base_model_id}`를 기반으로 피부 질환 지식 데이터와 RAFT 기법을 사용하여 미세조정(Fine-tuned)한 멀티모달 모델입니다.
 """
-    with open(readme_path, "w", encoding="utf-8") as f:
-        f.write(readme_content)
-    print("✅ README.md 생성 완료")
+        with open(readme_path, "w", encoding="utf-8") as f:
+            f.write(readme_content)
+        print("📝 기본 README.md 생성 완료.")
 
-api = HfApi(token=HF_TOKEN)
-
-# Repo 생성 (이미 있으면 무시)
-try:
-    api.create_repo(
-        repo_id=REPO_ID,
-        private=True,  # private으로 할지 public으로 할지 선택
-        exist_ok=True
-    )
-    print(f"✅ Repo 확인/생성: {REPO_ID}")
-except Exception as e:
-    print(f"⚠️  Repo 생성 중 경고: {e}")
-
-# 업로드 (대용량 파일이므로 시간이 걸립니다)
-print("\n📤 파일 업로드 중... (13GB 정도라 10-30분 소요될 수 있습니다)")
-print("   진행상황은 터미널에서 확인하세요.")
-
-try:
-    api.upload_folder(
-        folder_path=MERGED_DIR,
-        repo_id=REPO_ID,
-        commit_message="Upload fully merged LLaVA RAFT model (13.5GB)",
-        ignore_patterns=[".git/*", "*.pyc", "__pycache__/*", ".DS_Store"]
-    )
-
-    print("\n" + "=" * 60)
-    print("✅ 업로드 완료!")
-    print("=" * 60)
-    print(f"🔗 모델 확인: https://huggingface.co/{REPO_ID}")
-    print(f"🔗 파일 확인: https://huggingface.co/{REPO_ID}/tree/main")
-
-except Exception as e:
-    print(f"\n❌ 업로드 중 오류 발생:")
-    print(f"   {str(e)}")
-    print("\n💡 해결 방법:")
-    print("   1. 인터넷 연결 확인")
-    print("   2. HF 토큰 권한 확인 (write 권한 필요)")
-    print("   3. Colab Pro 사용 시 더 안정적")
-
-
-
-# ==================================================
-# [Code Cell]
-# ==================================================
-# Colab에서 실행
-MERGED_DIR = "/content/llava_raft_merged"
-
-# handler.py 내용을 위 코드로 작성
-handler_code = '''
-from typing import Dict, List, Any
-from PIL import Image
-import torch
-import base64
-from io import BytesIO
-
-class EndpointHandler:
-    def __init__(self, path=""):
-        from transformers import AutoModelForVision2Seq, AutoProcessor
-
-        self.model = AutoModelForVision2Seq.from_pretrained(
-            path,
-            torch_dtype=torch.float16,
-            device_map="auto"
+    # 3) Hugging Face Hub API 연동 및 업로드
+    api = HfApi(token=hf_token)
+    
+    try:
+        api.create_repo(
+            repo_id=args.repo_id,
+            private=True,
+            exist_ok=True
         )
-        self.processor = AutoProcessor.from_pretrained(path)
-        self.model.eval()
+        print(f"✅ 저장소 존재 확인/생성 완료: {args.repo_id}")
+        
+        print("🚀 파일 일괄 업로드 업로드 진행 중 (대용량 파일 전송으로 시간이 소요됩니다)...")
+        api.upload_folder(
+            folder_path=args.merged_dir,
+            repo_id=args.repo_id,
+            commit_message="Upload fully merged LLaVA RAFT model with custom handler",
+            ignore_patterns=[".git/*", "*.pyc", "__pycache__/*", ".DS_Store"]
+        )
+        print(f"🎉 Hugging Face 업로드 전과정 성공 완료! 저장소: https://huggingface.co/{args.repo_id}")
+    except Exception as e:
+        print(f"❌ 업로드 실패: {e}")
 
-    def __call__(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
-        try:
-            inputs = data.get("inputs", {})
+def main():
+    parser = argparse.ArgumentParser(description="LLaVA-1.5-7B 2차 RAFT RAG 얼라인먼트 학습 및 배포 CLI")
+    
+    # 모델 및 데이터 경로
+    parser.add_argument("--sft_checkpoint", type=str, default="/content/drive/MyDrive/dataset/finetuned_test_04", help="1차 SFT 가중치 체크포인트 폴더")
+    parser.add_argument("--base_model_id", type=str, default="llava-hf/llava-1.5-7b-hf", help="Hugging Face 베이스 모델 ID")
+    parser.add_argument("--raft_data", type=str, default="/content/raft_train_dataset_final.jsonl", help="RAFT 학습 데이터셋 JSONL 경로")
+    
+    # 아웃풋 저장 경로
+    parser.add_argument("--output_dir", type=str, default="./llava_raft_adapter", help="2차 LoRA 어댑터 저장 경로")
+    parser.add_argument("--merged_dir", type=str, default="./llava_raft_merged", help="최종 병합된 Full 가중치 저장 경로")
+    
+    # 하이퍼파라미터
+    parser.add_argument("--epochs", type=int, default=1, help="학습 에폭 수")
+    parser.add_argument("--batch_size", type=int, default=1, help="디바이스 배치 크기")
+    parser.add_argument("--grad_accum", type=int, default=8, help="그래디언트 누적 스텝")
+    parser.add_argument("--lr", type=float, default=6e-6, help="러닝 레이트")
+    
+    # LoRA 설정
+    parser.add_argument("--lora_r", type=int, default=64, help="LoRA Rank")
+    parser.add_argument("--lora_alpha", type=int, default=16, help="LoRA Alpha")
+    
+    # 허깅페이스 업로드 설정
+    parser.add_argument("--repo_id", type=str, default="jayun/llava_raft_01", help="업로드할 HF Repository ID")
+    parser.add_argument("--skip_train", action="store_true", help="학습 단계를 건너뛰고 기존 체크포인트 병합 및 업로드만 수행")
 
-            if isinstance(inputs.get("image"), str):
-                image_data = base64.b64decode(inputs["image"])
-                image = Image.open(BytesIO(image_data)).convert("RGB")
-            else:
-                image = inputs["image"]
+    args = parser.parse_args()
 
-            question = inputs.get("question", "Describe this image.")
-            prompt = f"USER: <image>\\n{question}\\nASSISTANT:"
+    # 입력 경로 정규화 및 보정
+    if not os.path.exists(args.sft_checkpoint):
+        # 로컬 세이브 폴더 등 탐색
+        for alt in ["./finetuned_sft_output", "../stage1-sft/finetuned_sft_output"]:
+            if os.path.exists(alt):
+                args.sft_checkpoint = alt
+                print(f"ℹ️ SFT 가중치 경로 보정됨: {alt}")
+                break
+                
+    if not os.path.exists(args.raft_data):
+        for prefix in ["", "../../", "./", "data/sample_data/"]:
+            candidate = os.path.join(prefix, "raft_train_dataset_final.jsonl")
+            if os.path.exists(candidate):
+                args.raft_data = candidate
+                print(f"ℹ️ RAFT 데이터 경로 보정됨: {candidate}")
+                break
 
-            model_inputs = self.processor(
-                text=prompt,
-                images=image,
-                return_tensors="pt"
-            ).to(self.model.device)
+    # 1. 학습 실행
+    if not args.skip_train:
+        trainer = LlavaRaftTrainer(args)
+        trainer.prepare_data()
+        trainer.run_training()
+    else:
+        print("ℹ️ --skip_train 플래그가 설정되어 훈련을 건너뜁니다.")
 
-            with torch.no_grad():
-                output = self.model.generate(
-                    **model_inputs,
-                    max_new_tokens=200,
-                    do_sample=False
-                )
+    # 2. 모델 병합
+    merge_and_save_model(args)
+    
+    # 3. 허깅페이스 업로드
+    upload_to_huggingface(args)
 
-            response = self.processor.decode(output[0], skip_special_tokens=True)
-
-            if "ASSISTANT:" in response:
-                response = response.split("ASSISTANT:")[-1].strip()
-
-            return [{"generated_text": response}]
-
-        except Exception as e:
-            return [{"error": str(e)}]
-'''
-
-# handler.py 저장
-with open(f"{MERGED_DIR}/handler.py", "w") as f:
-    f.write(handler_code)
-
-print("✅ handler.py 생성 완료")
-
-# Hugging Face에 업로드
-from huggingface_hub import HfApi
-
-HF_TOKEN = os.getenv("HF_TOKEN", "")
-REPO_ID = "jayun/llava_raft_01"
-
-api = HfApi(token=HF_TOKEN)
-
-# handler.py만 업로드
-api.upload_file(
-    path_or_fileobj=f"{MERGED_DIR}/handler.py",
-    path_in_repo="handler.py",
-    repo_id=REPO_ID,
-    commit_message="Add custom handler for Inference Endpoint"
-)
-
-print(f"✅ handler.py 업로드 완료!")
-print(f"🔗 확인: https://huggingface.co/{REPO_ID}/blob/main/handler.py")
-
-
+if __name__ == "__main__":
+    main()
