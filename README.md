@@ -115,8 +115,18 @@ HF_ENDPOINT_URL=your_huggingface_endpoint_url
 ```
 
 ### 2. 패키지 설치 및 실행
+> [!NOTE]
+> Flask 백엔드 서버(`app.py`)는 빌드된 React 정적 자산(`service/frontend/dist`)을 내부적으로 맵핑하여 통합 호스팅하도록 설계되어 있습니다. 
+> 따라서 별도의 프론트엔드 개발 서버를 켤 필요 없이, **백엔드 서버 하나만 기동하면 5000번 포트로 프론트엔드 UI 접속 및 API 추론이 한꺼번에 동작**합니다.
+
 ```bash
+# 1. 패키지 설치
 cd service/backend
 pip install -r requirements.txt
+
+# 2. Flask 통합 서버 기동 (5000 Port)
 python app.py
 ```
+
+기동 완료 후, 웹 브라우저에서 `http://localhost:5000` 으로 접속하면 정상적인 안면 피부 질환 챗봇 서비스를 바로 이용하실 수 있습니다. (외부 접속이 필요할 시 `.env`에 `NGROK_AUTH_TOKEN`을 입력하면 ngrok 터널링 주소가 자동으로 발급됩니다.)
+
