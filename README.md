@@ -63,7 +63,7 @@ graph TD
 
 ---
 
-## 🚀 모델 배포 (Model Release)
+## 모델 배포 (Model Release)
 
 본 프로젝트를 통해 학습이 완료된 최종 1차 SFT LoRA 어댑터 가중치는 **Hugging Face Hub**에 공식 배포되어 있습니다.
 
