@@ -63,7 +63,33 @@ graph TD
 
 ---
 
-## 프로젝트 구조 (Repository Structure)
+## 🚀 모델 배포 (Model Release)
+
+본 프로젝트를 통해 학습이 완료된 최종 1차 SFT LoRA 어댑터 가중치는 **Hugging Face Hub**에 공식 배포되어 있습니다.
+
+* **1차 SFT LoRA 어댑터 가중치**: [jun47/skin-llava-sft-lora](https://huggingface.co/jun47/skin-llava-sft-lora)
+
+```python
+from peft import PeftModel
+from transformers import LlavaForConditionalGeneration, AutoProcessor
+import torch
+
+base_model_id = "llava-hf/llava-1.5-7b-hf"
+adapter_model_id = "jun47/skin-llava-sft-lora"
+
+processor = AutoProcessor.from_pretrained(base_model_id)
+base_model = LlavaForConditionalGeneration.from_pretrained(
+    base_model_id, 
+    torch_dtype=torch.float16, 
+    device_map="auto"
+)
+model = PeftModel.from_pretrained(base_model, adapter_model_id)
+print("🎉 피부진단 SFT LoRA 어댑터 모델 로드 성공!")
+```
+
+---
+
+## 📂 프로젝트 구조 (Repository Structure)
 
 대용량 이미지 데이터셋의 원격 저장소 노출을 방지하기 위해 원본 데이터는 `.gitignore` 처리되었으며, 데이터 규격 검토용 **50라인의 샘플 스키마 데이터**가 저장소에 탑재되어 있습니다.
 
