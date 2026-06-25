@@ -11,9 +11,7 @@
 *   **Multimodal Fine-Tuning**: LLaVA-1.5-7B 모델에 한국인 피부질환 데이터를 학습시켜 안면 질환 진단 능력 제고.
 *   **Context-Augmented Alignment (RAFT)**: RAG 파이프라인 상의 정보 추출(Citation) 정확도와 노이즈 지문 차단력 개선을 위한 미세 조정 수행.
 *   **Dual-Translation Pipeline**: Gemini-2.5-Flash API를 결합하여 한국어 입력을 영어로 가공 후 LLaVA 추론을 거쳐 최종 한국어로 응답을 복원하는 번역 아키텍처.
-*   **Input & Domain Guardrails**: 
-    *   입력 이미지 해상도/조도 유효성 검수 및 비전 검사 (Vetting).
-    *   피부 건강 이외의 주제에 대한 질의 차단 필터 (Off-Topic Refusal).
+*   **Input & Domain Guardrails**: 건강 이외의 주제에 대한 질의 차단 필터 (Off-Topic Refusal).
 
 ---
 
