@@ -57,7 +57,8 @@ graph TD
 *   **Dataset**: 여드름, 아토피 등 5개 질환군 RAG 지식 지문 4,240 세트 (Oracle Document 1, Hard Negatives 3, Easy Negative 1 혼합 셔플).
 *   **Prompt Configuration**: 컨텍스트 지문 중 올바른 근거 번호를 식별하여 명시하도록 타겟 포맷 강제 (`근거 문맥: [번호]\n답변: {Answer}`).
 *   **Technical Note on RAFT Training**:
-    *   2차 RAG 얼라인먼트 학습 시, 텍스트 전용(Text-only) 지문 위주로 파인튜닝을 진행하는 과정에서 모델의 비전-언어 결합 가중치 정렬에 간섭이 발생하는 **Modality Mismatch** 현상이 발생하여 Train Loss가 다소 요동치는 경향을 보였습니다. 
+    *   2차 RAG 얼라인먼트 학습 시, 텍스트 전용(Text-only) 지문 위주로 파인튜닝을 진행하는 과정에서 모델의 비전-언어 결합 가중치 정렬에 간섭이 발생하는 **Modality Mismatch** 현상이 발생하여 Train Loss가 다소 요동치는 경향을 보였습니다.
+    *   self.processor에 이미지는 일절 제외한 채 오직 텍스트 문맥(prompts, targets)만 전달하여 학습용 배치를 생성하고 모델을 훈련하였고 비전-언어 결합 가중치(Projection Layer)에 왜곡을 초래하여 1차 SFT 때 학습했던 안면 피부질환 이미지 식별력(비전 능력)이 상실되는 파괴적 망각이 발생하였습니다.
     *   향후 고도화를 위해 학습 시 이미지 픽셀 정보(pixel_values)를 누락하지 않는 멀티모달 형태의 RAG-RAFT 기법 도입을 고려 중입니다.
 
 ---
