@@ -1,4 +1,4 @@
-# 🩺 방구석피부과
+# 방구석피부과
 
 > **한국인 안면 피부질환 자가 진단을 위한 Multimodal LLM 파인튜닝**
 
@@ -6,7 +6,7 @@
 
 ---
 
-## 🌟 주요 기능 (Features)
+## 주요 기능 (Features)
 
 *   **Multimodal Fine-Tuning**: LLaVA-1.5-7B 모델에 한국인 피부질환 데이터를 학습시켜 안면 질환 진단 능력 제고.
 *   **Context-Augmented Alignment (RAFT)**: RAG 파이프라인 상의 정보 추출(Citation) 정확도와 노이즈 지문 차단력 개선을 위한 미세 조정 수행.
@@ -15,7 +15,7 @@
 
 ---
 
-## 🏗️ 시스템 아키텍처 (System Architecture)
+## 시스템 아키텍처 (System Architecture)
 
 ```mermaid
 graph TD
@@ -43,7 +43,7 @@ graph TD
 
 ---
 
-## 📈 학습 정보 (Training Details)
+## 학습 정보 (Training Details)
 
 ### 1. Stage 1: SFT (Supervised Fine-Tuning)
 *   **Base Model**: `llava-hf/llava-1.5-7b-hf`
@@ -63,7 +63,7 @@ graph TD
 
 ---
 
-## 📂 프로젝트 구조 (Repository Structure)
+## 프로젝트 구조 (Repository Structure)
 
 대용량 이미지 데이터셋의 원격 저장소 노출을 방지하기 위해 원본 데이터는 `.gitignore` 처리되었으며, 데이터 규격 검토용 **50라인의 샘플 스키마 데이터**가 저장소에 탑재되어 있습니다.
 
@@ -92,7 +92,7 @@ graph TD
 
 ---
 
-## ⚙️ 실행 방법 (How to Run)
+## 실행 방법 (How to Run)
 
 ### 1. 환경 변수 설정
 프로젝트 루트에 `.env` 파일을 생성하고 아래 규격에 맞게 변수를 선언합니다. (학습용 코드는 상위 디렉토리의 `.env`를 자동으로 스캔합니다.)
