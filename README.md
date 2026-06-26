@@ -47,7 +47,7 @@ graph TD
 
 ### 1. Stage 1: SFT (Supervised Fine-Tuning)
 *   **Base Model**: `llava-hf/llava-1.5-7b-hf`
-*   **Dataset**: AI Hub 한국인 안면 피부질환 이미지 9,600장 기반 멀티턴 대화쌍 38,400 Turn.
+*   **Dataset**: AI Hub 동양인 안면 피부질환 이미지 9,600장 기반 멀티턴 대화쌍 38,400 Turn.(AI Hub의 '안면부 피부질환 이미지 합성 데이터')
 *   **Training Config**: QLoRA (8-bit Quantization), $R=16$, $\alpha=32$, Learning Rate $1\times10^{-4}$, Epoch 1 (조기 종료).
 *   **Metrics Evaluation**:
     *   **Accuracy**: Base 모델 대비 약 **60%** 향상 (0.093 ➔ 0.148)
